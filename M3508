@@ -1,0 +1,118 @@
+#include <SPI.h> 
+#include <mcp2515.h>
+
+// ========== MCP2515 Pins and Object ==========
+const int SPI_CS_PIN = 53;
+const int CAN_INT_PIN = 2;
+MCP2515 mcp2515(SPI_CS_PIN);
+
+// ========== CAN Frames for TX and RX ==========
+struct can_frame txMsg;  // For sending
+struct can_frame rxMsg;  // For receiving
+
+// ========== Function: Send Enable Command ==========
+void sendEnableCommand()
+
+
+{
+  // Enable command, 8 bytes: FF FF FF FF FF FF FF FC
+  txMsg.can_id  = 0x101;    
+  txMsg.can_dlc = 8;
+  txMsg.data[0] = 0xFF;
+  txMsg.data[1] = 0xFF;
+  txMsg.data[2] = 0xFF;
+  txMsg.data[3] = 0xFF;
+  txMsg.data[4] = 0xFF;
+  txMsg.data[5] = 0xFF;
+  txMsg.data[6] = 0xFF;
+  txMsg.data[7] = 0xFC;
+
+  if (mcp2515.sendMessage(&txMsg) == MCP2515::ERROR_OK) {
+    Serial.println("Enable command sent successfully!");
+  } else {
+    Serial.println("Failed to send enable command.");
+  }
+}
+
+// ========== Function: Send Position = 50.0, Velocity = 10.0 ==========
+void sendPosVel()
+{
+  // 8 bytes: 00 00 48 42 00 00 20 41 (Little endian float)
+  // float 50.0f = 0x42 48 00 00, float 10.0f = 0x41 20 00 00
+  txMsg.can_id  = 0x101; 
+  txMsg.can_dlc = 8;
+
+  txMsg.data[0] = 0x00;
+  txMsg.data[1] = 0x00;
+  txMsg.data[2] = 0x48;
+  txMsg.data[3] = 0x42;
+
+  txMsg.data[4] = 0x00;
+  txMsg.data[5] = 0x00;
+  txMsg.data[6] = 0x20;
+  txMsg.data[7] = 0x41;
+
+  if (mcp2515.sendMessage(&txMsg) == MCP2515::ERROR_OK) {
+    Serial.println("Position-Velocity frame sent!");
+  } else {
+    Serial.println("Failed to send position-velocity frame.");
+  }
+}
+
+// ========== Function: Receive and Parse Feedback ==========
+void handleCanRx()
+{
+  if (mcp2515.readMessage(&rxMsg) == MCP2515::ERROR_OK) {
+    // Data[0-3]: current position (float), Data[4-7]: current velocity (float)
+    if (rxMsg.can_id == 0x101) {
+      float curPos, curVel;
+      memcpy(&curPos, &rxMsg.data[0], sizeof(float));
+      memcpy(&curVel, &rxMsg.data[4], sizeof(float));
+
+      Serial.print("收到电机反馈(ID=0x101): pos=");
+      Serial.print(curPos);
+      Serial.print(", vel=");
+      Serial.println(curVel);
+    } 
+  }
+}
+
+void setup()
+{
+
+  Serial.begin(115200);
+  while(!Serial) {;}
+
+  // ========== Initialize MCP2515 ==========
+  mcp2515.reset();
+
+  MCP2515::ERROR err;
+  err = mcp2515.setBitrate(CAN_1000KBPS, MCP_8MHZ);
+  delay(2000);
+  if (err != MCP2515::ERROR_OK) {
+    Serial.print("setBitrate ERROR: ");
+    Serial.println(err);
+    } else {
+      err = mcp2515.setNormalMode();
+      if (err != MCP2515::ERROR_OK) {
+        Serial.print("setNormalMode ERROR: ");
+        Serial.println(err);
+        } else {
+          Serial.println("MCP2515 initialized successfully.");
+  }
+}
+
+  // ========== Send Enable Command First ==========
+  sendEnableCommand();
+  delay(50);
+
+  // ========== Then Send Position-Velocity Frame ==========
+  sendPosVel();
+}
+
+void loop()
+{
+  // Continuously receive CAN feedback
+  handleCanRx();
+  delay(10);
+}
